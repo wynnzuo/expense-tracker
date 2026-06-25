@@ -1,14 +1,28 @@
-# Expense Tracker
+# 记账助手
 
-智能记账助手，支持一句话文本记账和语音记账。
+智能记账助手，支持一句话记账、语音录入、AI 自动分类和统计。
 
 ## 功能
 
-- **一句话记账** — 输入"昨天中午吃饭 35"，自动识别金额、类别、日期
-- **语音记账** — 录音后自动转写成文字并记账
-- **智能识别** — 基于 LLM 的意图识别和字段提取，低置信度自动提醒
-- **账单管理** — 查看、编辑、确认、删除账单记录
-- **数据统计** — 月度收支汇总和分类占比图表
+- **聊天式记账** — 输入"中午吃饭 35"，AI 自动识别金额、类别、日期
+- **语音录入** — 点击麦克风录音，自动转写并识别
+- **HITL 确认流程** — AI 解析后展示结构化数据，确认后才保存
+- **账单管理** — 查看、编辑、删除历史账单
+- **数据统计** — 月度收支、本周对比、日均支出、分类占比图表
+
+## 截图
+
+```
+😎 中午吃饭 35
+🤖 请确认：
+
+┌─ 📋 确认记账 ──────────────┐
+│  中午吃饭          -¥35    │
+│  餐饮 · 支出 · 2026-06-25  │
+│                             │
+│  [✓确认记账]  [✏️修改]  [✕不要] │
+└─────────────────────────────┘
+```
 
 ## 技术栈
 
@@ -16,35 +30,10 @@
 |---|---|
 | 前端 | React 19 + Vite + TypeScript + Tailwind CSS 4 |
 | 后端 | FastAPI + Deep Agents (LangChain) |
-| 数据库 | PostgreSQL (Docker) / SQLAlchemy |
-| AI | DeepSeek / 兼容 OpenAI API 的 LLM |
+| 数据库 | PostgreSQL (Docker) / SQLite（本地回退） |
+| LLM | DeepSeek / 兼容 OpenAI API |
+| 语音 | DashScope Recognition API (`paraformer-realtime-v2`) |
 | 容器 | Docker Compose |
-
-## 项目结构
-
-```
-expense-tracker/
-├── frontend/              # React + Vite 前端
-│   ├── components/        # UI 组件
-│   ├── hooks/             # 自定义 Hooks
-│   ├── lib/               # API 客户端和工具
-│   ├── src/
-│   │   ├── pages/         # 路由页面
-│   │   └── styles/        # 全局样式
-│   └── types/             # TypeScript 类型
-├── backend/               # FastAPI 后端
-│   ├── app/
-│   │   ├── agent/         # Deep Agents 智能助手
-│   │   │   ├── tools.py   # 6 个自定义工具函数
-│   │   │   ├── agent.py   # Agent 构建
-│   │   │   └── services/  # 业务编排
-│   │   ├── routes/        # HTTP 路由
-│   │   ├── repositories.py # 数据库操作
-│   │   └── db.py          # 数据库连接
-│   └── tests/
-├── requirements.md        # 需求文档
-└── docker-compose.yml     # 一键启动
-```
 
 ## 快速开始
 
@@ -55,71 +44,82 @@ expense-tracker/
 
 ### 配置
 
-编辑 `.env` 文件：
+复制 `.env.example` 为 `.env`，填入 API Key：
 
 ```env
-LLM_API_KEY="你的 API Key"
+LLM_API_KEY="sk-xxx"
 ```
 
-### 启动
+### Docker 启动
 
 ```bash
 docker compose up --build
 ```
 
-然后访问：
-
 - 前端：http://localhost:3000
-- 后端健康检查：http://localhost:8000/health
+- 后端：http://localhost:8000/docs
 
-## 本地开发
+### 本地开发
 
-### 前端
-
+**前端：**
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-### 后端
-
+**后端：**
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-## 测试
+## 项目结构
 
-```bash
-# 前端类型检查
-npm run typecheck
-
-# 前端构建
-npm run build
-
-# 后端测试
-python3 -m unittest discover -s backend/tests
 ```
-
-## 需求文档
-
-详细需求、技术架构、数据库设计、前端页面说明见 [requirements.md](./requirements.md)。
+expense-tracker/
+├── frontend/               # React + Vite
+│   ├── components/         # UI 组件
+│   │   ├── chat-message.tsx    # 聊天气泡
+│   │   ├── home-client.tsx     # 对话界面 + HITL 卡片
+│   │   ├── insight-chart.tsx   # 饼图组件
+│   │   ├── site-shell.tsx      # 导航框架
+│   │   └── ui/                 # 基础 UI 组件
+│   ├── hooks/              # 自定义 Hooks
+│   ├── lib/api.ts          # API 客户端
+│   ├── src/pages/          # 路由页面
+│   └── types/              # TypeScript 类型
+├── backend/                # FastAPI + Deep Agents
+│   ├── app/
+│   │   ├── agent/          # 智能助手
+│   │   │   ├── tools.py    # 6 个工具函数
+│   │   │   ├── agent.py    # Agent 构建
+│   │   │   └── services/   # 业务编排
+│   │   ├── routes/         # HTTP 路由
+│   │   ├── stt.py          # 语音转写（DashScope）
+│   │   ├── repositories.py # 数据库操作
+│   │   └── db.py           # 数据库连接
+│   └── tests/
+├── requirements.md         # 需求文档
+└── docker-compose.yml
+```
 
 ## 智能助手
 
-后端使用 Deep Agents（LangChain 出品的 Agent 框架）构建记账助手，包含 6 个专用工具：
+后端使用 [Deep Agents](https://github.com/langchain-ai/deepagents)（LangChain 出品的 Agent 框架）构建，包含 6 个工具：
 
-| 工具 | 功能 |
+| 工具 | 说明 |
 |------|------|
-| `create_transaction` | 创建账单（自动分类） |
-| `query_monthly_summary` | 月度收支汇总 |
+| `create_transaction` | 解析输入，返回结构化预览（不自动保存） |
+| `query_monthly_summary` | 本月收支 + 日均支出汇总 |
 | `list_recent_transactions` | 最近账单列表 |
 | `update_existing_transaction` | 修改账单 |
-| `confirm_pending_transaction` | 确认待入账 |
+| `confirm_pending_transaction` | 确认入账 |
 | `delete_existing_transaction` | 删除账单 |
 
-LLM 自动判断用户意图并调用对应工具，无需手动路由。
+LLM 自动识别用户意图并调用对应工具。
+
+## 需求文档
+
+详见 [requirements.md](./requirements.md)。
