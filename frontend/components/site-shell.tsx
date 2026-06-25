@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { BarChart3, List, MessageSquareText } from "lucide-react";
+import { BarChart3, List, MessageSquareText, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
@@ -14,10 +14,12 @@ export function SiteShell({
   children,
   currentPath,
   variant = "default",
+  onClear,
 }: {
   children: ReactNode;
   currentPath: string;
   variant?: "default" | "chat";
+  onClear?: () => void;
 }) {
   const isChat = variant === "chat";
 
@@ -33,7 +35,14 @@ export function SiteShell({
           <Link to="/" className="hover:opacity-80">
             <h1 className="font-heading text-lg font-semibold tracking-tight md:text-xl">记账助手</h1>
           </Link>
-          <nav className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-white/70 p-1">
+          <div className="flex items-center gap-2">
+            {isChat && onClear ? (
+              <button onClick={onClear} title="清空聊天记录"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--muted)] transition hover:bg-red-50 hover:text-red-400">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            ) : null}
+            <nav className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-white/70 p-1">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentPath === item.href;
@@ -54,6 +63,7 @@ export function SiteShell({
               );
             })}
           </nav>
+          </div>
         </header>
         <div className={cn("flex-1", isChat ? "px-3 pb-3 md:px-5 md:pb-5" : "px-5 pb-5 md:px-7 md:pb-7")}>
           {children}

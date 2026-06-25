@@ -7,7 +7,6 @@ from app.repositories import (
     confirm_transaction as repo_confirm,
     delete_transaction as repo_delete,
     list_transactions,
-    save_transaction,
     summarize_transactions,
     update_transaction as repo_update,
 )
@@ -26,16 +25,19 @@ def create_transaction(
     type: str = "expense",
     date: str | None = None,
     merchant: str | None = None,
+    source: str = "text",
 ) -> str:
-    """解析用户输入，预览一笔账单。不会保存，请用户确认后再保存。
+    """创建一笔账单记录。收到记账输入时直接调用此工具。
+    **注意：如果用户说了「昨天」「前天」「上周五」等相对日期，请计算出具体日期传入 date 参数。**
 
     Args:
         note: 账单备注，如"中午吃饭"
         amount: 金额，如 35
         category: 类别。可选值：餐饮, 交通, 购物, 娱乐, 工资, 其他
         type: 类型。expense 表示支出, income 表示收入
-        date: 日期，格式 YYYY-MM-DD，不传则默认为今天
+        date: 日期，格式 YYYY-MM-DD。用户说"昨天"则传昨天的日期，不传则默认为今天
         merchant: 商户名称，可选
+        source: 来源 text 或 voice
     """
     if category not in VALID_CATEGORIES:
         return f"无效类别「{category}」，可选：{', '.join(VALID_CATEGORIES)}"
@@ -47,9 +49,9 @@ def create_transaction(
         return "金额必须大于 0"
 
     txn_date = date or datetime.now().date().isoformat()
-    type_label = "收入" if type == "income" else "支出"
 
-    logger.info("transaction previewed | amount=%s | category=%s | type=%s", amount, category, type)
+    type_label = "收入" if type == "income" else "支出"
+    logger.info("transaction parsed | amount=%s | category=%s | type=%s", amount, category, type)
     return f"（预览）{category}{type_label} ¥{amount:,.2f} · {note} · {txn_date}"
 
 

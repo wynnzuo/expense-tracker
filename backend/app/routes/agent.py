@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
-from app.agent.models import AgentRequest
-from app.agent.services.agent_service import process_agent_request
+from app.agent.models import AgentRequest, ResumeRequest
+from app.agent.services.agent_service import process_agent_request, resume_agent_request
 from app.logging_utils import get_logger
 
 router = APIRouter()
@@ -13,7 +13,18 @@ async def run_agent(request: AgentRequest) -> dict:
     if not request.input.strip():
         raise HTTPException(status_code=400, detail="Missing input")
 
-    logger.info("agent request received | source=%s | input=%s", request.source, request.input)
+    logger.info("agent request | source=%s | input=%s", request.source, request.input)
     payload = await process_agent_request(request)
-    logger.info("agent response ready | reply=%s", payload.get("finalResponse"))
+    logger.info("agent response | status=%s", payload.get("status"))
+    return payload
+
+
+@router.post("/agent/resume")
+async def resume_agent(request: ResumeRequest) -> dict:
+    if not request.threadId.strip():
+        raise HTTPException(status_code=400, detail="Missing threadId")
+
+    logger.info("agent resume | thread=%s", request.threadId)
+    payload = await resume_agent_request(request)
+    logger.info("agent resume done | status=%s", payload.get("status"))
     return payload

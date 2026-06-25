@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.stt import SpeechToTextError, transcribe_audio
@@ -12,7 +14,9 @@ async def transcribe_voice(file: UploadFile = File(...)) -> dict[str, str]:
         raise HTTPException(status_code=400, detail="空音频文件，无法转写。")
 
     try:
-        transcript = transcribe_audio(
+        # STT 是同步的（WebSocket 连接），放到线程池避免阻塞事件循环
+        transcript = await asyncio.to_thread(
+            transcribe_audio,
             audio_bytes=audio_bytes,
             filename=file.filename or "recording.webm",
             content_type=file.content_type,

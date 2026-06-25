@@ -1,4 +1,4 @@
-from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.state import CompiledStateGraph
 
 from app.agent.tools import AGENT_TOOLS
@@ -18,19 +18,25 @@ AGENT_SYSTEM_PROMPT = """你是 Expense Tracker 的中文记账助手。
 6. **删除账单** — 用户要删某笔，调用 delete_existing_transaction
 
 工作原则：
-- 日常记账输入（"昨天吃饭 30"）→ 直接调用 create_transaction
-- 从用户输入中提取金额、类别、备注等信息，归类到合理的中文类别
+- 日常记账输入 → 直接调用 create_transaction
+- **正确识别相对日期**：用户说"昨天"则传昨天的日期，"前天"传前天的日期
 - 如果用户输入含糊不清，先问清楚再操作
-- 每次操作完成后，用自然语言告诉用户结果
 - 分类建议：餐饮/交通/购物/娱乐/工资/其他
 """
 
 
+_agent: CompiledStateGraph | None = None
+
+
 def build_agent() -> CompiledStateGraph:
-    """创建并返回 deepagents 记账助手。"""
+    """创建并返回 deepagents 记账助手，启用 create_transaction 的 HITL。"""
     from deepagents import create_deep_agent
 
     from app.agent.llm import get_chat_model
+
+    global _agent
+    if _agent is not None:
+        return _agent
 
     model = get_chat_model()
 
@@ -39,7 +45,10 @@ def build_agent() -> CompiledStateGraph:
         tools=AGENT_TOOLS,
         system_prompt=AGENT_SYSTEM_PROMPT,
         name="expense-tracker-agent",
+        interrupt_on={"create_transaction": True},
+        checkpointer=MemorySaver(),
     )
 
-    logger.info("deepagents agent built successfully | tools=%d", len(AGENT_TOOLS))
+    logger.info("deepagents agent built successfully | tools=%d | hitl=enabled", len(AGENT_TOOLS))
+    _agent = agent
     return agent

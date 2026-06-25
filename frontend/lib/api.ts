@@ -25,6 +25,20 @@ export async function submitAgent(input: string, source: "text" | "voice", conve
   return (await response.json()) as AgentResult;
 }
 
+export async function resumeAgent(
+  threadId: string,
+  source: "text" | "voice" = "text",
+  conversationId?: string,
+): Promise<AgentResult> {
+  const response = await fetch(`${apiBaseUrl}/agent/resume`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ threadId, source, conversationId: conversationId ?? "" }),
+  });
+  if (!response.ok) throw new Error("Resume failed");
+  return (await response.json()) as AgentResult;
+}
+
 export async function fetchTransactions(limit = 20): Promise<Transaction[]> {
   const response = await fetch(`${apiBaseUrl}/transactions?limit=${limit}`);
 

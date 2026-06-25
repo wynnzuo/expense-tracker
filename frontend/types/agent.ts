@@ -8,8 +8,10 @@ export type ParsedTransaction = {
 };
 
 export type AgentResult = {
-  rawInput: string;
+  status: "interrupted" | "completed" | "error";
+  threadId?: string;
+  rawInput?: string;
   source?: "text" | "voice";
-  finalResponse?: string;
+  finalResponse?: string | null;
   parsedTransaction?: ParsedTransaction | null;
 };

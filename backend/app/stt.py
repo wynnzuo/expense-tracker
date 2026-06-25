@@ -1,5 +1,8 @@
 import os
+import struct
+import subprocess
 import tempfile
+import wave
 from pathlib import Path
 
 from app.logging_utils import get_logger
@@ -9,6 +12,39 @@ logger = get_logger("app.stt")
 
 class SpeechToTextError(Exception):
     pass
+
+
+def _is_silent_wav(wav_path: str) -> bool:
+    """检查 WAV 文件是否过于安静（可能没有语音）。"""
+    try:
+        with wave.open(wav_path, "rb") as w:
+            frames = w.getnframes()
+            if frames == 0:
+                return True
+            raw = w.readframes(min(frames, 16000))  # 只看前 1 秒
+            samples = struct.unpack(f"<{len(raw)//2}h", raw[: len(raw) // 2 * 2])
+            peak = max(abs(s) for s in samples) / 32768
+            return peak < 0.01  # 峰值低于 1% 认为太安静
+    except Exception:
+        return False  # 无法判断时放行
+
+
+def _convert_to_wav(input_path: str) -> str:
+    """用 ffmpeg 将任意音频转为 DashScope 需要的 16kHz 单声道 WAV。"""
+    output = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+    cmd = [
+        "ffmpeg", "-y", "-i", input_path,
+        "-ar", "16000", "-ac", "1", "-sample_fmt", "s16",
+        output,
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, check=True, timeout=30)
+        logger.debug("audio converted to wav | input=%s", Path(input_path).name)
+        return output
+    except subprocess.CalledProcessError as exc:
+        raise SpeechToTextError(
+            f"音频转换失败：{exc.stderr.decode(errors='ignore')[:200]}"
+        ) from exc
 
 
 def transcribe_audio(*, audio_bytes: bytes, filename: str, content_type: str | None) -> str:
@@ -21,31 +57,24 @@ def transcribe_audio(*, audio_bytes: bytes, filename: str, content_type: str | N
     if any("一" <= c <= "鿿" for c in api_key):
         raise SpeechToTextError("STT_API_KEY 包含中文占位符，请填写真实的 API Key。")
 
-    # 音频格式检测
     ext = Path(filename).suffix.lower()
-    if ext == ".webm":
-        fmt = "opus"
-        rate = 48000
-    elif ext == ".wav":
-        fmt = "wav"
-        rate = 16000
-    elif ext == ".mp3":
-        fmt = "mp3"
-        rate = 16000
-    else:
-        fmt = "opus"
-        rate = 48000
+    tmp_input = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    tmp_wav: str | None = None
 
-    # 保存到临时文件
-    tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
     try:
-        tmp.write(audio_bytes)
-        tmp.close()
-        audio_path = tmp.name
+        tmp_input.write(audio_bytes)
+        tmp_input.close()
+        raw_path = tmp_input.name
 
-        logger.info("stt starting | model=%s | format=%s | size=%d", model, fmt, len(audio_bytes))
+        # 转成 16kHz WAV
+        tmp_wav = _convert_to_wav(raw_path)
 
-        # 使用 DashScope Recognition API
+        # 检查音频是否有声音
+        if _is_silent_wav(tmp_wav):
+            raise SpeechToTextError("音频太安静，请靠近麦克风重新录音。")
+
+        logger.info("stt starting | model=%s | size=%d | wav=%s", model, len(audio_bytes), tmp_wav)
+
         from dashscope.audio.asr.recognition import Recognition, RecognitionCallback, RecognitionResult
 
         result_holder: list[str | None] = [None]
@@ -55,8 +84,12 @@ def transcribe_audio(*, audio_bytes: bytes, filename: str, content_type: str | N
             def on_complete(self, result: RecognitionResult) -> None:
                 sentence = result.get_sentence()
                 if sentence:
-                    result_holder[0] = sentence.get("text", "").strip()
-                logger.debug("stt on_complete | sentence=%s", result_holder[0])
+                    if isinstance(sentence, list):
+                        texts = [s.get("text", "") for s in sentence if isinstance(s, dict)]
+                        result_holder[0] = "".join(texts).strip()
+                    elif isinstance(sentence, dict):
+                        result_holder[0] = sentence.get("text", "").strip()
+                logger.debug("stt on_complete | text=%s", result_holder[0])
 
             def on_error(self, error: str) -> None:
                 error_holder[0] = error
@@ -74,23 +107,41 @@ def transcribe_audio(*, audio_bytes: bytes, filename: str, content_type: str | N
         rec = Recognition(
             model=model,
             callback=_Callback(),
-            format=fmt,
-            sample_rate=rate,
+            format="wav",
+            sample_rate=16000,
         )
-        rec_result = rec.call(file=audio_path, api_key=api_key)
+        logger.debug("stt invoking recognition api...")
+        rec_result = rec.call(file=tmp_wav, api_key=api_key)
+        logger.debug("stt recognition api returned")
 
-        # 优先从 callback 获取结果
+        # 优先从回调拿结果
         if result_holder[0]:
             logger.info("stt completed | text=%s", result_holder[0])
             return result_holder[0]
 
-        # 回退从 call 返回值获取
-        sentence = rec_result.get_sentence()
-        if sentence:
-            text = sentence.get("text", "").strip()
-            if text:
-                logger.info("stt fallback result | text=%s", text)
-                return text
+        # 回退：从 rec.call 返回值提取
+        if rec_result:
+            sentence = rec_result.get_sentence()
+            if sentence:
+                if isinstance(sentence, list):
+                    texts = [s.get("text", "") for s in sentence if isinstance(s, dict)]
+                    full = "".join(texts).strip()
+                elif isinstance(sentence, dict):
+                    full = sentence.get("text", "").strip()
+                else:
+                    full = ""
+                if full:
+                    logger.info("stt fallback result | text=%s", full)
+                    return full
+
+        # 再等一会看回调会不会触发
+        import time
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if result_holder[0] is not None:
+                logger.info("stt delayed result | text=%s", result_holder[0])
+                return result_holder[0]
+            time.sleep(0.05)
 
         if error_holder[0]:
             raise SpeechToTextError(f"语音转写失败：{error_holder[0]}")
@@ -104,6 +155,11 @@ def transcribe_audio(*, audio_bytes: bytes, filename: str, content_type: str | N
         raise SpeechToTextError(f"语音转写出错：{exc}") from exc
     finally:
         try:
-            os.unlink(audio_path)
+            os.unlink(tmp_input.name)
         except Exception:
             pass
+        if tmp_wav:
+            try:
+                os.unlink(tmp_wav)
+            except Exception:
+                pass
