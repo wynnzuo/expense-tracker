@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+.venv/
+
+# production
+dist/
+/build
+/out
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# env
+.env
+.env.local
+
+# typescript
+*.tsbuildinfo
+
+# local data
+*.db
+
+# python
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+.vscode/
+
+# claude skills (local install, not project code)
+.claude/skills/

@@ -1,0 +1,10 @@
+.git
+.gitignore
+.next
+node_modules
+npm-debug.log
+backend/.venv
+backend/**/__pycache__
+backend/.pytest_cache
+.DS_Store
+*.tsbuildinfo
