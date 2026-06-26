@@ -1,5 +1,7 @@
+import json
 import uuid
 from datetime import datetime
+from typing import AsyncGenerator
 
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
@@ -148,3 +150,78 @@ async def resume_agent_request(request: ResumeRequest) -> dict:
             "threadId": request.threadId,
             "finalResponse": error_msg,
         }
+
+
+async def process_agent_stream(request: AgentRequest) -> AsyncGenerator[str, None]:
+    """SSE 流式处理 agent 请求。
+
+    逐步推送 LLM token，结束后根据结果推送 interrupt / done / error 事件。
+    """
+    agent = build_agent()
+    thread_id = request.conversationId or str(uuid.uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+
+    # 清除旧中断状态
+    try:
+        state = await agent.aget_state(config)
+        if state and state.interrupts:
+            logger.info("clearing stale interrupt | thread=%s", thread_id)
+            await agent.ainvoke(
+                Command(resume={"decisions": [{"type": "reject", "message": "新消息覆盖"}]}),
+                config,
+            )
+    except Exception:
+        pass
+
+    final_response = ""
+
+    try:
+        # 流式推送 LLM token
+        async for event in agent.astream_events(
+            {"messages": [HumanMessage(content=request.input)]},
+            config,
+            version="v2",
+        ):
+            if event["event"] == "on_chat_model_stream":
+                chunk = event["data"]["chunk"]
+                content = ""
+                if isinstance(chunk, str):
+                    content = chunk
+                elif hasattr(chunk, "content"):
+                    content = chunk.content
+                if content:
+                    final_response += content
+                    yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+
+        # 流结束后检查是否被 HITL 中断
+        state = await agent.aget_state(config)
+        if state and state.interrupts:
+            for msg in reversed(state.values.get("messages", [])):
+                tc = getattr(msg, "tool_calls", None) or []
+                if tc:
+                    parsed = _extract_tool_args(tc)
+                    if parsed:
+                        logger.info(
+                            "agent interrupted | input=%s | parsed=%s",
+                            request.input,
+                            parsed,
+                        )
+                        yield f"data: {json.dumps({'type': 'interrupt', 'parsedTransaction': parsed})}\n\n"
+                        return
+
+        # 正常完成
+        final_response = final_response or "已收到请求。"
+        _persist_messages(
+            request.conversationId, request.input, final_response, request.source
+        )
+
+        logger.info("agent stream completed | input=%s", request.input)
+        yield f"data: {json.dumps({'type': 'done', 'finalResponse': final_response})}\n\n"
+
+    except Exception as exc:
+        error_msg = f"处理请求时出错：{exc}"
+        _persist_messages(
+            request.conversationId, request.input, error_msg, request.source
+        )
+        logger.error("agent stream failed | input=%s | error=%s", request.input, exc)
+        yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"

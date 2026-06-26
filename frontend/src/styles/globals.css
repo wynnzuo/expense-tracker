@@ -105,6 +105,11 @@ select {
   50% { opacity: 0.8; }
 }
 
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
 @keyframes recording-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(218, 93, 40, 0.4); }
   50% { box-shadow: 0 0 0 12px rgba(218, 93, 40, 0); }
@@ -133,6 +138,10 @@ select {
 
 .animate-recording {
   animation: recording-pulse 1.5s ease-in-out infinite;
+}
+
+.animate-blink {
+  animation: blink 1s step-end infinite;
 }
 
 /* ── Loading Skeleton ── */

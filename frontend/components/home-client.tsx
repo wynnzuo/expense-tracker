@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   createTransaction,
   fetchConversation,
-  submitAgent,
+  streamAgent,
   uploadVoiceAndTranscribe,
 } from "@/lib/api";
 import type { ParsedTransaction } from "@/types/agent";
@@ -140,15 +140,43 @@ export function HomeClient() {
     addMessage("user", trimmed);
     setIsSubmitting(true);
     setPendingTx(null);
+
+    // 添加一个空的占位消息，流式 token 会渐进填充
+    const msgId = crypto.randomUUID();
+    setMessages(prev => [...prev, { id: msgId, role: "assistant", content: "", timestamp: new Date() }]);
+
+    let fullContent = "";
     try {
-      const result = await submitAgent(trimmed, "text", cid.current);
-      if (result.status === "interrupted" && result.parsedTransaction) {
-        setPendingTx(result.parsedTransaction);
-      } else if (result.finalResponse) {
-        addMessage("assistant", result.finalResponse);
-      }
-    } catch { addMessage("error", "请求失败，请检查后端是否运行。"); }
-    finally { setIsSubmitting(false); }
+      await streamAgent(
+        trimmed,
+        "text",
+        cid.current,
+        // onToken: 逐步更新消息内容
+        (token) => {
+          fullContent += token;
+          setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, content: fullContent } : m)));
+        },
+        // onInterrupt: 移除占位消息，显示 TransactionCard
+        (parsedTx) => {
+          setMessages(prev => prev.filter(m => m.id !== msgId));
+          setPendingTx(parsedTx);
+        },
+        // onDone: 流结束，如果内容为空则设置默认值
+        (_finalResponse) => {
+          if (!fullContent) {
+            setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, content: "已收到请求。" } : m)));
+          }
+        },
+        // onError
+        (errorMsg) => {
+          setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, role: "error" as const, content: errorMsg } : m)));
+        },
+      );
+    } catch {
+      setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, role: "error" as const, content: "请求失败，请检查后端是否运行。" } : m)));
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   async function handleVoiceRecord() {
@@ -170,10 +198,32 @@ export function HomeClient() {
         try {
           const data = await uploadVoiceAndTranscribe(audioBlob);
           addMessage("user", `🎤 ${data.transcript}`);
-          const result = await submitAgent(data.transcript, "voice", cid.current);
-          if (result.status === "interrupted" && result.parsedTransaction) {
-            setPendingTx(result.parsedTransaction);
-          } else if (result.finalResponse) { addMessage("assistant", result.finalResponse); }
+
+          const msgId = crypto.randomUUID();
+          setMessages(prev => [...prev, { id: msgId, role: "assistant", content: "", timestamp: new Date() }]);
+
+          let fullContent = "";
+          await streamAgent(
+            data.transcript,
+            "voice",
+            cid.current,
+            (token) => {
+              fullContent += token;
+              setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, content: fullContent } : m)));
+            },
+            (parsedTx) => {
+              setMessages(prev => prev.filter(m => m.id !== msgId));
+              setPendingTx(parsedTx);
+            },
+            (_finalResponse) => {
+              if (!fullContent) {
+                setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, content: "已收到请求。" } : m)));
+              }
+            },
+            (errorMsg) => {
+              setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, role: "error" as const, content: errorMsg } : m)));
+            },
+          );
         } catch (err) {
           addMessage("error", err instanceof TypeError ? "请求失败，请检查后端是否运行。" : err instanceof Error ? err.message : "语音转写失败。");
         } finally { setIsSubmitting(false); }

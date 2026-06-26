@@ -25,6 +25,63 @@ export async function submitAgent(input: string, source: "text" | "voice", conve
   return (await response.json()) as AgentResult;
 }
 
+export async function streamAgent(
+  input: string,
+  source: "text" | "voice",
+  conversationId: string,
+  onToken: (token: string) => void,
+  onInterrupt: (parsedTx: ParsedTransaction) => void,
+  onDone: (finalResponse: string) => void,
+  onError: (message: string) => void,
+): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/agent/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ input, source, conversationId: conversationId ?? "" }),
+  });
+
+  if (!response.ok) {
+    onError("Agent request failed");
+    return;
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const data = JSON.parse(line.slice(6));
+        switch (data.type) {
+          case "token":
+            onToken(data.content);
+            break;
+          case "interrupt":
+            onInterrupt(data.parsedTransaction);
+            break;
+          case "done":
+            onDone(data.finalResponse);
+            break;
+          case "error":
+            onError(data.message);
+            break;
+        }
+      } catch {
+        // skip malformed lines
+      }
+    }
+  }
+}
+
 export async function resumeAgent(
   threadId: string,
   source: "text" | "voice" = "text",

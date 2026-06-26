@@ -35,7 +35,11 @@ export function ChatMessage({ message }: { message: ChatMessageData }) {
                 : "border border-[var(--border)] bg-white/80 text-[var(--foreground)] shadow-[var(--shadow-sm)]"
           }`}
         >
-          <p>{message.content}</p>
+          {message.content ? (
+            <p>{message.content}</p>
+          ) : message.role === "assistant" ? (
+            <p className="animate-pulse text-[var(--muted)]">思考中<span className="animate-blink">|</span></p>
+          ) : null}
           {message.transaction ? (
             <div className="mt-2 border-t border-[var(--border)] pt-2 text-xs text-[var(--muted)]">
               <span className={message.transaction.type === "income" ? "text-[var(--success)]" : "text-[var(--accent)]"}>
