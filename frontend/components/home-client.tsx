@@ -103,6 +103,7 @@ export function HomeClient() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const recordingStartedAt = useRef(0);
   const cid = useRef(getConversationId());
 
   useEffect(() => {
@@ -191,6 +192,13 @@ export function HomeClient() {
       chunksRef.current = [];
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       recorder.onstop = async () => {
+        // 录音太短（< 500ms）会生成损坏的 WebM 文件
+        if (Date.now() - recordingStartedAt.current < 500) {
+          streamRef.current?.getTracks().forEach(t => t.stop());
+          streamRef.current = null; chunksRef.current = []; setRecording(false);
+          addMessage("error", "录音太短，请按住多说一会。"); return;
+        }
+
         const audioBlob = new Blob(chunksRef.current, { type: mimeType || "audio/webm" });
         streamRef.current?.getTracks().forEach(t => t.stop());
         streamRef.current = null; chunksRef.current = []; setRecording(false);
@@ -228,7 +236,8 @@ export function HomeClient() {
           addMessage("error", err instanceof TypeError ? "请求失败，请检查后端是否运行。" : err instanceof Error ? err.message : "语音转写失败。");
         } finally { setIsSubmitting(false); }
       };
-      recorder.start();
+      recorder.start(250); // 每 250ms 获取一次音频数据，确保 WebM 文件头完整
+      recordingStartedAt.current = Date.now();
       setRecording(true);
     } catch { addMessage("error", "没有拿到麦克风权限。"); }
   }

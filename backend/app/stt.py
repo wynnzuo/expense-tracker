@@ -33,7 +33,7 @@ def _convert_to_wav(input_path: str) -> str:
     """用 ffmpeg 将任意音频转为 DashScope 需要的 16kHz 单声道 WAV。"""
     output = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
     cmd = [
-        "ffmpeg", "-y", "-i", input_path,
+        "ffmpeg", "-y", "-hide_banner", "-i", input_path,
         "-ar", "16000", "-ac", "1", "-sample_fmt", "s16",
         output,
     ]
@@ -69,11 +69,26 @@ def transcribe_audio(*, audio_bytes: bytes, filename: str, content_type: str | N
         # 转成 16kHz WAV
         tmp_wav = _convert_to_wav(raw_path)
 
+        # 诊断：打印 WAV 文件属性
+        try:
+            with wave.open(tmp_wav, "rb") as w:
+                wav_frames = w.getnframes()
+                wav_rate = w.getframerate()
+                wav_dur = wav_frames / wav_rate if wav_rate else 0
+                raw_data = w.readframes(min(wav_frames, wav_rate))
+                samples = struct.unpack(f"<{len(raw_data)//2}h", raw_data[: len(raw_data) // 2 * 2])
+                peak = max(abs(s) for s in samples) / 32768
+                rms = (sum(s * s for s in samples) / len(samples)) ** 0.5 / 32768 if samples else 0
+                logger.info("wav diagnostics | dur=%.2fs | frames=%d | rate=%d | peak=%.4f | rms=%.4f | size=%d",
+                            wav_dur, wav_frames, wav_rate, peak, rms, os.path.getsize(tmp_wav))
+        except Exception as exc:
+            logger.warning("wav diagnostic failed | error=%s", exc)
+
         # 检查音频是否有声音
         if _is_silent_wav(tmp_wav):
             raise SpeechToTextError("音频太安静，请靠近麦克风重新录音。")
 
-        logger.info("stt starting | model=%s | size=%d | wav=%s", model, len(audio_bytes), tmp_wav)
+        logger.info("stt starting | model=%s | input_size=%d | wav=%s", model, len(audio_bytes), tmp_wav)
 
         from dashscope.audio.asr.recognition import Recognition, RecognitionCallback, RecognitionResult
 
@@ -114,6 +129,15 @@ def transcribe_audio(*, audio_bytes: bytes, filename: str, content_type: str | N
         rec_result = rec.call(file=tmp_wav, api_key=api_key)
         logger.debug("stt recognition api returned")
 
+        # 诊断：打印 DashScope 返回信息
+        if rec_result is not None:
+            logger.info("stt dashscope response | status=%s | request_id=%s | code=%s | msg=%s | output=%s",
+                        rec_result.status_code,
+                        getattr(rec_result, "request_id", ""),
+                        getattr(rec_result, "code", ""),
+                        getattr(rec_result, "message", ""),
+                        rec_result.output)
+
         # 优先从回调拿结果
         if result_holder[0]:
             logger.info("stt completed | text=%s", result_holder[0])
@@ -146,7 +170,13 @@ def transcribe_audio(*, audio_bytes: bytes, filename: str, content_type: str | N
         if error_holder[0]:
             raise SpeechToTextError(f"语音转写失败：{error_holder[0]}")
 
-        raise SpeechToTextError("语音转写失败：返回为空，没有拿到转写文本。")
+        # 收集详细信息到错误消息
+        details = ""
+        if rec_result is not None:
+            rid = getattr(rec_result, "request_id", "")
+            sc = getattr(rec_result, "status_code", "")
+            details = f" (status={sc}, request_id={rid}, output={rec_result.output})"
+        raise SpeechToTextError(f"语音转写失败：返回为空，没有拿到转写文本。{details}")
 
     except SpeechToTextError:
         raise
